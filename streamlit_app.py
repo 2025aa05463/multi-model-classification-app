@@ -26,19 +26,27 @@ try:
 except Exception:
     HAS_XGB = False
 
+# import our data utility
+from data_utils import fetch_kaggle_data
+
 st.set_page_config(page_title="Multi-model Classification App", layout="wide")
 st.title("Multi-model Classification App")
 
 st.sidebar.header("Data")
 uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"]) 
-use_example = st.sidebar.checkbox("Use example Iris dataset", value=True)
+use_example = st.sidebar.checkbox("Use example Kaggle dataset (mobile-price-classification)", value=True)
 
 if use_example:
-    from sklearn.datasets import load_iris
-    iris = load_iris(as_frame=True)
-    df = iris.frame.copy()
-    if 'target' not in df.columns:
-        df['target'] = iris.target
+    try:
+        df, chosen_path = fetch_kaggle_data("iabhishekofficial/mobile-price-classification")
+        st.write(f"Loaded dataset from: {chosen_path} with shape {df.shape}")
+    except Exception as e:
+        st.warning(f"Kaggle dataset load failed: {e}. Falling back to Iris dataset.")
+        from sklearn.datasets import load_iris
+        iris = load_iris(as_frame=True)
+        df = iris.frame.copy()
+        if 'target' not in df.columns:
+            df['target'] = iris.target
 else:
     df = None
     if uploaded_file:
