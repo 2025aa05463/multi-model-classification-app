@@ -26,51 +26,19 @@ try:
 except Exception:
     HAS_XGB = False
 
-from data_utils import fetch_kaggle_data
-
 st.set_page_config(page_title="Multi-model Classification App", layout="wide")
 st.title("Multi-model Classification App")
 
 # --- Sidebar: Data ---
 st.sidebar.header("Data")
-DATASET_ID = "iabhishekofficial/mobile-price-classification"
-st.sidebar.markdown(f"**Fixed training dataset:** `{DATASET_ID}`")
+uploaded = st.sidebar.file_uploader("Upload dataset (CSV) - this will be used for training and evaluation", type=['csv'])
 
-# Use session_state to cache the downloaded dataset
-if 'train_df' not in st.session_state:
-    st.session_state['train_df'] = None
-    st.session_state['train_path'] = None
-
-if st.sidebar.button("(Re)load training dataset") or st.session_state['train_df'] is None:
-    try:
-        df_train, train_path = fetch_kaggle_data(DATASET_ID)
-        st.session_state['train_df'] = df_train
-        st.session_state['train_path'] = train_path
-        st.sidebar.success(f"Loaded: {os.path.basename(train_path)} ({df_train.shape[0]} rows, {df_train.shape[1]} cols)")
-    except Exception as e:
-        st.sidebar.error(f"Failed to load Kaggle dataset: {e}")
-        # fallback to iris
-        from sklearn.datasets import load_iris
-        iris = load_iris(as_frame=True)
-        df_train = iris.frame.copy()
-        if 'target' not in df_train.columns:
-            df_train['target'] = iris.target
-        st.session_state['train_df'] = df_train
-        st.session_state['train_path'] = 'iris_fallback'
-        st.sidebar.info("Using Iris dataset as fallback")
-
-train_df = st.session_state['train_df']
-train_path = st.session_state['train_path']
-
-st.sidebar.write(f"Training file: `{train_path}`")
-st.sidebar.write(f"Training shape: {None if train_df is None else train_df.shape}")
-
-# Upload test CSV (optional)
 st.sidebar.markdown("---")
-uploaded_test = st.sidebar.file_uploader("Upload test CSV (optional)", type=['csv'])
-use_uploaded_test = uploaded_test is not None
+# test size slider
+test_size = st.sidebar.slider("Test set proportion (when splitting uploaded data)", 0.05, 0.5, 0.2, 0.05)
+random_state = int(st.sidebar.number_input("Random state", value=42, step=1))
 
-# --- Sidebar: Model selection and options ---
+# --- Sidebar: Model selection ---
 st.sidebar.header("Model selection")
 model_options = ["Logistic Regression", "Decision Tree", "K-Nearest Neighbors", "Naive Bayes", "Random Forest"]
 if HAS_XGB:
@@ -82,21 +50,28 @@ nb_variant = None
 if selected_model == 'Naive Bayes':
     nb_variant = st.sidebar.selectbox("Naive Bayes variant", ["GaussianNB", "MultinomialNB"]) 
 
+# hyperparams
 st.sidebar.markdown("---")
-# simple hyperparams
 rf_n_estimators = st.sidebar.slider("RF: n_estimators", 10, 500, 100, 10)
 knn_k = st.sidebar.slider("KNN: n_neighbors", 1, 50, 5, 1)
 
-# --- Main area: Dataset preview and target selection ---
-if train_df is None:
-    st.error("Training dataset not loaded.")
+# --- Main area ---
+if uploaded is None:
+    st.info("Please upload a CSV dataset in the sidebar to train and evaluate models.")
     st.stop()
 
-st.subheader("Training dataset preview")
-st.dataframe(train_df.head())
+try:
+    df = pd.read_csv(uploaded)
+except Exception as e:
+    st.error(f"Failed to read uploaded CSV: {e}")
+    st.stop()
 
-all_columns = list(train_df.columns)
-target_column = st.selectbox("Select target column (from training dataset)", options=all_columns, index=len(all_columns)-1)
+st.subheader("Uploaded dataset preview")
+st.dataframe(df.head())
+
+all_columns = list(df.columns)
+# default target: last column
+target_column = st.selectbox("Select target column", options=all_columns, index=len(all_columns)-1)
 feature_columns = [c for c in all_columns if c != target_column]
 selected_features = st.multiselect("Select feature columns (empty = all features)", options=feature_columns, default=feature_columns)
 
@@ -104,25 +79,12 @@ if len(selected_features) == 0:
     st.warning("No features selected.")
     st.stop()
 
-# Load test data if uploaded
-if use_uploaded_test:
-    try:
-        test_df = pd.read_csv(uploaded_test)
-        st.write("Uploaded test data preview:")
-        st.dataframe(test_df.head())
-    except Exception as e:
-        st.error(f"Failed to read uploaded test CSV: {e}")
-        st.stop()
-else:
-    test_df = None
+X = df[selected_features]
+y = df[target_column]
 
-# Prepare X/y
-X_train_full = train_df[selected_features]
-y_train_full = train_df[target_column]
-
-# Preprocessing detection
-numeric_cols = X_train_full.select_dtypes(include=['int64', 'float64']).columns.tolist()
-categorical_cols = X_train_full.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
+# detect types
+numeric_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
+categorical_cols = X.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
 
 preprocess_numeric = Pipeline([('imputer', SimpleImputer(strategy='mean')), ('scaler', StandardScaler())]) if len(numeric_cols)>0 else 'passthrough'
 preprocess_categorical = Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('onehot', OneHotEncoder(handle_unknown='ignore'))]) if len(categorical_cols)>0 else 'passthrough'
@@ -133,34 +95,22 @@ if len(categorical_cols)>0:
     transformers.append(('cat', preprocess_categorical, categorical_cols))
 preprocessor = ColumnTransformer(transformers=transformers, remainder='drop')
 
-# Train / Evaluate button
-st.header("Train and evaluate the selected model")
+st.header("Train and evaluate")
 if st.button("Train & Evaluate"):
-    # decide train/test
-    if test_df is not None:
-        # expect test_df has same columns including target; if not, error
-        if target_column not in test_df.columns:
-            st.error(f"Uploaded test CSV does not contain the target column '{target_column}'.")
-            st.stop()
-        X_test = test_df[selected_features]
-        y_test = test_df[target_column]
-        # use full training data to train
-        X_train = X_train_full
-        y_train = y_train_full
-    else:
-        X_train, X_test, y_train, y_test = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42, stratify=y_train_full if len(np.unique(y_train_full))>1 else None)
+    # split uploaded data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y if len(np.unique(y))>1 else None)
 
-    # select model
+    # instantiate model
     if selected_model == 'Logistic Regression':
         clf = LogisticRegression(max_iter=1000)
     elif selected_model == 'Decision Tree':
-        clf = DecisionTreeClassifier(random_state=42)
+        clf = DecisionTreeClassifier(random_state=random_state)
     elif selected_model == 'K-Nearest Neighbors':
         clf = KNeighborsClassifier(n_neighbors=knn_k)
     elif selected_model == 'Naive Bayes':
         clf = GaussianNB() if nb_variant == 'GaussianNB' else MultinomialNB()
     elif selected_model == 'Random Forest':
-        clf = RandomForestClassifier(n_estimators=rf_n_estimators, random_state=42)
+        clf = RandomForestClassifier(n_estimators=rf_n_estimators, random_state=random_state)
     elif selected_model == 'XGBoost' and HAS_XGB:
         clf = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
     else:
@@ -171,7 +121,6 @@ if st.button("Train & Evaluate"):
     with st.spinner('Training model...'):
         pipeline.fit(X_train, y_train)
 
-    # predictions
     y_pred = pipeline.predict(X_test)
     try:
         y_proba = pipeline.predict_proba(X_test)
@@ -210,12 +159,10 @@ if st.button("Train & Evaluate"):
     }
     st.json(metrics)
 
-    # classification report
     st.subheader('Classification report')
     report = classification_report(y_test, y_pred, zero_division=0, output_dict=False)
     st.text(report)
 
-    # confusion matrix
     st.subheader('Confusion matrix')
     cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
     fig, ax = plt.subplots()
@@ -224,11 +171,11 @@ if st.button("Train & Evaluate"):
     ax.set_ylabel('Actual')
     st.pyplot(fig)
 
-    # save model and provide download
     buf = io.BytesIO()
     joblib.dump(pipeline, buf)
     buf.seek(0)
     st.download_button('Download trained model', data=buf, file_name=f"{selected_model.replace(' ','_')}_model.joblib")
+
     try:
         os.makedirs('model', exist_ok=True)
         joblib.dump(pipeline, os.path.join('model', f"{selected_model.replace(' ','_')}_model.joblib"))
