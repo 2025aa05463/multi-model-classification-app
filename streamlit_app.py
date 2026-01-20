@@ -2,183 +2,208 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB, MultinomialNB
+from sklearn.naive_bayes import GaussianNB
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, matthews_corrcoef, roc_auc_score, classification_report, confusion_matrix
+from xgboost import XGBClassifier
 import joblib
 import io
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-# optional xgboost
-try:
-    from xgboost import XGBClassifier
-    HAS_XGB = True
-except Exception:
-    HAS_XGB = False
-
 st.set_page_config(page_title="Multi-model Classification App", layout="wide")
-st.title("Multi-model Classification App")
+st.title("🤖 Multi-model Classification App")
+st.markdown("Train and evaluate multiple classification models on Mobile Price Classification dataset")
 
-# --- Sidebar: Data ---
-st.sidebar.header("Data")
-uploaded = st.sidebar.file_uploader("Upload dataset (CSV) - this will be used for training and evaluation", type=['csv'])
+# --- About Dataset ---
+with st.expander("📖 About the Dataset", expanded=True):
+    st.markdown("""
+    **Mobile Price Classification Dataset**
+    
+    This dataset contains mobile phone specifications and their price ranges.
+    - **Source**: Kaggle (iabhishekofficial/mobile-price-classification)
+    - **Target**: `price_range` (0: low cost, 1: medium cost, 2: high cost, 3: very high cost)
+    - **Features**: Battery power, RAM, internal memory, camera specs, etc.
+    - **Train/Test Split**: Fixed 80/20 split with random_state=42
+    """)
 
-st.sidebar.markdown("---")
-# test size slider
-test_size = st.sidebar.slider("Test set proportion (when splitting uploaded data)", 0.05, 0.5, 0.2, 0.05)
-random_state = int(st.sidebar.number_input("Random state", value=42, step=1))
-
-# --- Sidebar: Model selection ---
-st.sidebar.header("Model selection")
-model_options = ["Logistic Regression", "Decision Tree", "K-Nearest Neighbors", "Naive Bayes", "Random Forest"]
-if HAS_XGB:
-    model_options.append("XGBoost")
-
-selected_model = st.sidebar.selectbox("Select a model to train/evaluate", model_options)
-
-nb_variant = None
-if selected_model == 'Naive Bayes':
-    nb_variant = st.sidebar.selectbox("Naive Bayes variant", ["GaussianNB", "MultinomialNB"]) 
-
-# hyperparams
-st.sidebar.markdown("---")
-rf_n_estimators = st.sidebar.slider("RF: n_estimators", 10, 500, 100, 10)
-knn_k = st.sidebar.slider("KNN: n_neighbors", 1, 50, 5, 1)
-
-# --- Main area ---
-if uploaded is None:
-    st.info("Please upload a CSV dataset in the sidebar to train and evaluate models.")
-    st.stop()
-
-try:
-    df = pd.read_csv(uploaded)
-except Exception as e:
-    st.error(f"Failed to read uploaded CSV: {e}")
-    st.stop()
-
-st.subheader("Uploaded dataset preview")
-st.dataframe(df.head())
-
-all_columns = list(df.columns)
-# default target: last column
-target_column = st.selectbox("Select target column", options=all_columns, index=len(all_columns)-1)
-feature_columns = [c for c in all_columns if c != target_column]
-selected_features = st.multiselect("Select feature columns (empty = all features)", options=feature_columns, default=feature_columns)
-
-if len(selected_features) == 0:
-    st.warning("No features selected.")
-    st.stop()
-
-X = df[selected_features]
-y = df[target_column]
-
-# detect types
-numeric_cols = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
-categorical_cols = X.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
-
-preprocess_numeric = Pipeline([('imputer', SimpleImputer(strategy='mean')), ('scaler', StandardScaler())]) if len(numeric_cols)>0 else 'passthrough'
-preprocess_categorical = Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('onehot', OneHotEncoder(handle_unknown='ignore'))]) if len(categorical_cols)>0 else 'passthrough'
-transformers = []
-if len(numeric_cols)>0:
-    transformers.append(('num', preprocess_numeric, numeric_cols))
-if len(categorical_cols)>0:
-    transformers.append(('cat', preprocess_categorical, categorical_cols))
-preprocessor = ColumnTransformer(transformers=transformers, remainder='drop')
-
-st.header("Train and evaluate")
-if st.button("Train & Evaluate"):
-    # split uploaded data
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y if len(np.unique(y))>1 else None)
-
-    # instantiate model
-    if selected_model == 'Logistic Regression':
-        clf = LogisticRegression(max_iter=1000)
-    elif selected_model == 'Decision Tree':
-        clf = DecisionTreeClassifier(random_state=random_state)
-    elif selected_model == 'K-Nearest Neighbors':
-        clf = KNeighborsClassifier(n_neighbors=knn_k)
-    elif selected_model == 'Naive Bayes':
-        clf = GaussianNB() if nb_variant == 'GaussianNB' else MultinomialNB()
-    elif selected_model == 'Random Forest':
-        clf = RandomForestClassifier(n_estimators=rf_n_estimators, random_state=random_state)
-    elif selected_model == 'XGBoost' and HAS_XGB:
-        clf = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-    else:
-        st.error('Selected model is not available')
+# Load fixed train/test data
+@st.cache_data
+def load_data():
+    """Load pre-split train and test data"""
+    try:
+        train_df = pd.read_csv('data/train.csv')
+        test_df = pd.read_csv('data/test.csv')
+        return train_df, test_df
+    except FileNotFoundError:
+        st.error("data/train.csv or data/test.csv not found in repository!")
         st.stop()
 
-    pipeline = Pipeline([('preprocessor', preprocessor), ('clf', clf)])
-    with st.spinner('Training model...'):
-        pipeline.fit(X_train, y_train)
+train_df, test_df = load_data()
 
-    y_pred = pipeline.predict(X_test)
-    try:
-        y_proba = pipeline.predict_proba(X_test)
-    except Exception:
-        y_proba = None
+# Display dataset info
+col1, col2 = st.columns(2)
+with col1:
+    st.info(f"📊 Training set: {len(train_df)} samples")
+with col2:
+    st.info(f"📊 Test set: {len(test_df)} samples")
 
-    # metrics
-    acc = accuracy_score(y_test, y_pred)
-    prec = precision_score(y_test, y_pred, average='weighted', zero_division=0)
-    rec = recall_score(y_test, y_pred, average='weighted', zero_division=0)
-    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
-    mcc = matthews_corrcoef(y_test, y_pred)
+# Show dataset preview
+with st.expander("View Dataset Preview"):
+    st.subheader("Training Data Sample")
+    st.dataframe(train_df.head())
+    st.subheader("Test Data Sample")
+    st.dataframe(test_df.head())
 
-    # AUC
-    unique_labels = np.unique(y_test)
-    auc = None
-    if y_proba is not None:
-        try:
-            if len(unique_labels) == 2:
-                auc = float(roc_auc_score(y_test, y_proba[:,1]))
-            else:
-                from sklearn.preprocessing import label_binarize
-                y_test_b = label_binarize(y_test, classes=unique_labels)
-                auc = float(roc_auc_score(y_test_b, y_proba, multi_class='ovr', average='macro'))
-        except Exception:
-            auc = None
+# Download test.csv link
+with open('data/test.csv', 'rb') as f:
+    st.download_button(
+        label="📥 Download test.csv",
+        data=f,
+        file_name="test.csv",
+        mime="text/csv",
+        help="Download the test dataset used for evaluation"
+    )
 
-    st.subheader('Evaluation metrics')
-    metrics = {
-        'accuracy': acc,
-        'auc': auc,
-        'precision': prec,
-        'recall': rec,
-        'f1': f1,
-        'mcc': mcc
+# Prepare data
+target_column = 'price_range'
+X_test = test_df.drop(target_column, axis=1)
+y_test = test_df[target_column]
+
+# Load pre-trained models at startup
+@st.cache_resource
+def load_pretrained_models():
+    """Load all pre-trained models from saved_models directory"""
+    models_dir = 'model/saved_models'
+    model_files = {
+        'Logistic Regression': 'Logistic_Regression_model.joblib',
+        'Decision Tree': 'Decision_Tree_model.joblib',
+        'K-Nearest Neighbors': 'K-Nearest_Neighbors_model.joblib',
+        'Naive Bayes': 'Naive_Bayes_model.joblib',
+        'Random Forest': 'Random_Forest_model.joblib',
+        'XGBoost': 'XGBoost_model.joblib'
     }
-    st.json(metrics)
+    
+    loaded_models = {}
+    missing_models = []
+    
+    for model_name, filename in model_files.items():
+        model_path = os.path.join(models_dir, filename)
+        if os.path.exists(model_path):
+            loaded_models[model_name] = joblib.load(model_path)
+        else:
+            missing_models.append(model_name)
+    
+    return loaded_models, missing_models
 
-    st.subheader('Classification report')
-    report = classification_report(y_test, y_pred, zero_division=0, output_dict=False)
-    st.text(report)
+# Load models
+with st.spinner('Loading pre-trained models...'):
+    pretrained_models, missing = load_pretrained_models()
 
-    st.subheader('Confusion matrix')
-    cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', xticklabels=unique_labels, yticklabels=unique_labels, ax=ax)
-    ax.set_xlabel('Predicted')
-    ax.set_ylabel('Actual')
-    st.pyplot(fig)
+if missing:
+    st.warning(f"⚠️ Missing pre-trained models: {', '.join(missing)}")
+    st.info("Please run the training notebooks in the model/ folder to generate these models.")
 
-    buf = io.BytesIO()
-    joblib.dump(pipeline, buf)
-    buf.seek(0)
-    st.download_button('Download trained model', data=buf, file_name=f"{selected_model.replace(' ','_')}_model.joblib")
+# --- Sidebar: Model selection ---
+st.sidebar.header("🎯 Model Selection")
+available_models = list(pretrained_models.keys())
+selected_model = st.sidebar.selectbox("Select a model to evaluate", available_models)
 
+st.header(f"Evaluation: {selected_model}")
+
+# Get pre-trained model
+if selected_model not in pretrained_models:
+    st.error(f'{selected_model} is not available. Please train it first.')
+    st.stop()
+
+model = pretrained_models[selected_model]
+
+# Predict using pre-trained model
+y_pred = model.predict(X_test)
+try:
+    y_proba = model.predict_proba(X_test)
+except Exception:
+    y_proba = None
+
+# Calculate metrics
+acc = accuracy_score(y_test, y_pred)
+prec = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+rec = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+mcc = matthews_corrcoef(y_test, y_pred)
+
+# AUC
+unique_labels = np.unique(y_test)
+auc = None
+if y_proba is not None:
     try:
-        os.makedirs('model', exist_ok=True)
-        joblib.dump(pipeline, os.path.join('model', f"{selected_model.replace(' ','_')}_model.joblib"))
-        st.success(f"Model saved to model/{selected_model.replace(' ','_')}_model.joblib")
-    except Exception as e:
-        st.warning(f"Failed to save model locally: {e}")
+        if len(unique_labels) == 2:
+            auc = float(roc_auc_score(y_test, y_proba[:,1]))
+        else:
+            from sklearn.preprocessing import label_binarize
+            y_test_b = label_binarize(y_test, classes=unique_labels)
+            auc = float(roc_auc_score(y_test_b, y_proba, multi_class='ovr', average='macro'))
+    except Exception:
+        auc = None
+
+# Display metrics
+st.subheader('Evaluation Metrics')
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Accuracy", f"{acc:.4f}")
+    st.metric("Precision", f"{prec:.4f}")
+with col2:
+    st.metric("Recall", f"{rec:.4f}")
+    st.metric("F1 Score", f"{f1:.4f}")
+with col3:
+    st.metric("MCC", f"{mcc:.4f}")
+    if auc is not None:
+        st.metric("AUC", f"{auc:.4f}")
+    else:
+        st.metric("AUC", "N/A")
+
+# Classification Report
+st.subheader('Classification Report')
+report_dict = classification_report(y_test, y_pred, zero_division=0, output_dict=True)
+report_df = pd.DataFrame(report_dict).transpose()
+st.dataframe(report_df.style.format("{:.2f}"), use_container_width=True)
+
+# Confusion Matrix
+st.subheader('Confusion Matrix')
+cm = confusion_matrix(y_test, y_pred, labels=unique_labels)
+fig, ax = plt.subplots(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', xticklabels=unique_labels, yticklabels=unique_labels, 
+           ax=ax, cmap='Blues')
+ax.set_xlabel('Predicted')
+ax.set_ylabel('Actual')
+ax.set_title(f'Confusion Matrix - {selected_model}')
+st.pyplot(fig)
+
+# Model info
+with st.expander("ℹ️ Model Information"):
+    st.markdown(f"""
+    **Model**: {selected_model}  
+    **Status**: Pre-trained  
+    **Training Data**: 1600 samples  
+    **Test Data**: 400 samples  
+    """)
+    
+    # Download model button
+    model_path = f'model/saved_models/{selected_model.replace(" ", "_")}_model.joblib'
+    if os.path.exists(model_path):
+        with open(model_path, 'rb') as f:
+            st.download_button(
+                label='💾 Download trained model',
+                data=f,
+                file_name=f"{selected_model.replace(' ','_')}_model.joblib",
+                mime='application/octet-stream'
+            )
+
