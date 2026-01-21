@@ -59,7 +59,7 @@ To solve this problem, Bob collects sales data of mobile phones from various com
 |--------------|----------|-----|-----------|--------|-----|-----|
 | Logistic Regression | 0.9825 | 0.9992 | 0.9826 | 0.9825 | 0.9825 | 0.9767 |
 | Decision Tree | 0.8675 | 0.9631 | 0.8673 | 0.8675 | 0.8671 | 0.8235 |
-| K-Nearest Neighbors | 0.6500 | 0.8608 | 0.6496 | 0.6500 | 0.6497 | 0.5334 |
+| kNN | 0.6500 | 0.8608 | 0.6496 | 0.6500 | 0.6497 | 0.5334 |
 | Naive Bayes | 0.8100 | 0.9506 | 0.8113 | 0.8100 | 0.8105 | 0.7468 |
 | Random Forest (Ensemble) | 0.8875 | 0.9817 | 0.8870 | 0.8875 | 0.8872 | 0.8500 |
 | XGBoost (Ensemble) | 0.9400 | 0.9927 | 0.9399 | 0.9400 | 0.9397 | 0.9202 |
@@ -70,94 +70,8 @@ To solve this problem, Bob collects sales data of mobile phones from various com
 |--------------|-------------------------------------|
 | Logistic Regression | **Best overall performance** with 98.25% accuracy and highest AUC (0.9992). Exceptional balance across all metrics with near-perfect precision, recall, and F1 scores. Despite being a simple linear model, it achieves outstanding results on this dataset, indicating strong linear separability between price ranges. The very high MCC (0.9767) demonstrates extremely reliable predictions across all classes. This model is the clear winner for this classification task. |
 | Decision Tree | Good performance with 86.75% accuracy and strong AUC (0.9631). The model shows improved generalization compared to basic configurations with MCC of 0.8235. While it captures non-linear patterns effectively, it still shows some overfitting tendencies. The decent performance across all metrics makes it a solid choice, though it's outperformed by ensemble methods and logistic regression. |
-| K-Nearest Neighbors | **Moderate performance** with 65% accuracy, showing significant improvement from the baseline but still the weakest performer. The AUC of 0.8608 suggests reasonable ranking ability despite lower classification accuracy. The MCC of 0.5334 indicates moderate correlation between predictions and actual values. The distance-based approach struggles with the high-dimensional feature space (20 features), and even with optimized hyperparameters (K=7, distance weighting), it cannot match other algorithms. Feature scaling helps but isn't sufficient to overcome the curse of dimensionality. |
-| Naive Bayes | Reasonable performance with 81% accuracy and strong AUC (0.9506). The high AUC relative to accuracy indicates excellent probability calibration despite moderate classification performance. The independence assumption between features limits its effectiveness, but it remains a fast and interpretable option. Consistent performance across metrics (precision, recall, F1 all ~0.81) shows balanced predictions across all price range classes. |
+| kNN | **Moderate performance** with 65% accuracy and the weakest performer. The AUC of 0.8608 suggests reasonable ranking ability despite lower classification accuracy. The MCC of 0.5334 indicates moderate correlation between predictions and actual values. The distance-based approach struggles with the high-dimensional feature space (20 features), and even with optimized hyperparameters (K=7, distance weighting), it cannot match other algorithms. Feature scaling helps but isn't sufficient to overcome the curse of dimensionality. |
+| Naive Bayes | Reasonable performance with 81% accuracy and strong AUC (0.9506). The high AUC relative to accuracy indicates excellent probability calibration despite moderate classification performance. Consistent performance across metrics (precision, recall, F1 all ~0.81) shows balanced predictions across all price range classes. |
 | Random Forest (Ensemble) | Strong performance with 88.75% accuracy and excellent AUC (0.9817). The ensemble approach provides robust generalization with high MCC (0.8500), indicating reliable predictions. By combining multiple decision trees, it reduces overfitting and improves stability compared to a single decision tree. The balanced metrics across precision, recall, and F1 demonstrate consistent performance across all price categories. A solid choice offering good accuracy with interpretability through feature importance. |
 | XGBoost (Ensemble) | **Second-best performance** with 94% accuracy and very high AUC (0.9927). Excellent MCC (0.9202) demonstrates strong predictive power across all classes. The gradient boosting approach effectively captures complex non-linear patterns while maintaining good generalization. Balanced metrics (precision, recall, F1 all ~0.94) show consistent performance. While slightly below Logistic Regression, it demonstrates the power of advanced ensemble methods and would be the top choice if the data had more complex non-linear relationships. |
 
-### Key Insights:
-1. **Logistic Regression** achieves the best performance (98.25% accuracy), demonstrating that linear relationships dominate this dataset
-2. **Ensemble methods** (Random Forest: 88.75%, XGBoost: 94%) significantly outperform their base learner (Decision Tree: 86.75%)
-3. **KNN improved to 65%** with hyperparameter tuning but still struggles with high-dimensional feature space
-4. **AUC scores** consistently exceed accuracy scores, indicating all models have good probability calibration and ranking ability
-5. The dataset is well-suited for linear models, with diminishing returns from complex non-linear approaches
-
-## How to Run
-
-### 1. Create a virtual environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # macOS / Linux
-.venv\Scripts\activate     # Windows
-```
-
-### 2. Install requirements
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Run Streamlit app
-
-```bash
-streamlit run streamlit_app.py
-```
-
-### 4. Using the app
-
-1. The app loads with the Mobile Price Classification dataset pre-split into train/test sets
-2. View dataset information and download test.csv if needed
-3. Select a model from the sidebar dropdown
-4. The model automatically trains and displays:
-   - Evaluation metrics (Accuracy, Precision, Recall, F1, MCC, AUC)
-   - Classification report (per-class performance)
-   - Confusion matrix visualization
-5. Download the trained model as a .joblib file
-
-## Repository Structure
-
-```
-project-folder/
-├── streamlit_app.py          # Main Streamlit application
-├── requirements.txt          # Python dependencies
-├── README.md                 # This file
-├── evaluate_models.py        # Script to evaluate all models
-├── data/                     # Dataset folder
-│   ├── train.csv            # Training data (1600 samples)
-│   └── test.csv             # Test data (400 samples)
-└── model/                    # Model implementations
-    ├── decision_tree.ipynb
-    ├── knn.ipynb
-    ├── logistic_regression.ipynb
-    ├── naive_bayes.ipynb
-    ├── random_forest.ipynb
-    ├── xgboost.ipynb
-    └── saved_models/         # Trained models (.joblib)
-        ├── Logistic_Regression_model.joblib
-        ├── Decision_Tree_model.joblib
-        ├── K-Nearest_Neighbors_model.joblib
-        ├── Naive_Bayes_model.joblib
-        ├── Random_Forest_model.joblib
-        └── XGBoost_model.joblib
-```
-
-## Metrics Explanation
-
-- **Accuracy**: Overall correctness of predictions
-- **AUC (Area Under ROC Curve)**: Model's ability to distinguish between classes (higher is better)
-- **Precision**: Of all positive predictions, how many were correct
-- **Recall**: Of all actual positives, how many were found
-- **F1 Score**: Harmonic mean of precision and recall
-- **MCC (Matthews Correlation Coefficient)**: Correlation between predictions and actual values (-1 to +1, higher is better)
-
-## Technologies Used
-
-- **Python 3.12**
-- **Streamlit**: Web application framework
-- **scikit-learn**: Machine learning models and metrics
-- **XGBoost**: Gradient boosting framework
-- **pandas**: Data manipulation
-- **numpy**: Numerical computing
-- **matplotlib & seaborn**: Data visualization
-- **joblib**: Model serialization
